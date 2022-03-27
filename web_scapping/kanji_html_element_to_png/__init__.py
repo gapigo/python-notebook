@@ -1,13 +1,13 @@
 from email.mime import image
 from fileinput import filename
-from os import link
+from os import path
+from pathlib import Path
 from html2image import Html2Image
 import requests
 from bs4 import BeautifulSoup
-hti = Html2Image()
 from time import time
 from convert import romajiToJapanese
-from os.path  import basename
+from os.path import basename
 from urllib.parse import quote
 
 
@@ -19,13 +19,18 @@ from urllib.parse import quote
 
 begin = time()
 
+hti = Html2Image()
+hti.output_path = path.join(Path(__file__).parent.absolute(), f'images')
+
 def get_html_from_url(url: str):
     req = requests.get(url)
     return BeautifulSoup(req.content, 'html.parser')
 
+
 def download_image(url: str):
-    with open(basename(url), "wb") as f:
+    with open(path.join(Path(__file__).parent.absolute(), f'images/nihongoichiban.gif'), "wb") as f:
         f.write(requests.get(url).content)
+
 
 def search_on_nihongoichiban(searched_kanji: str, jlpt='n5') -> dict:
     # n5, n4 and n3
@@ -47,28 +52,61 @@ def search_on_nihongoichiban(searched_kanji: str, jlpt='n5') -> dict:
             # ['2011', '04', '11', '%e6%82%aa', '']
             link = kanji_link['href']
             soup = get_html_from_url(link)
-            table = soup.find_all("tbody")[0]
-            rom_rows = table.find_all("td")
-            meaning = rom_rows[2].getText()
-            rom_katakana = rom_rows[3].getText()
-            rom_hiragana = rom_rows[5].getText()
-            rom_katakana = rom_katakana.replace('(', '•').replace(')', '').replace(',', '、')
-            rom_hiragana = rom_hiragana.replace('(', '•').replace(')', '').replace(',', '、')
-              
+            try:
+                table = soup.find_all("tbody")[0]
+                rom_rows = table.find_all("td")
+                meaning = rom_rows[1].getText()
+                rom_katakana = rom_rows[3].getText()
+                rom_hiragana = rom_rows[5].getText()
+            except IndexError:
+                div = soup.find_all("div", class_="entry-content")[0]
+                paragraphs = div.find_all("p")
+                meaning = ''
+                rom_katakana = ''
+                rom_hiragana = ''
+
+                def get_only_alpha(text: str):
+                    res = ''
+                    for char in text:
+                        if char.isalpha():
+                            res += char
+                    return res
+
+                for p in paragraphs:
+                    if len(strong := p.findChildren('strong')) != 0:
+                        strong = strong[0].getText()
+                        strong = get_only_alpha(strong)
+                        if strong.lower() == "meaning":
+                            meaning = p.getText().split(':')[1].strip()
+                            continue
+                        if strong.lower() == "onyomi":
+                            rom_katakana = p.getText().split(':')[1].strip()
+                            continue
+                        if strong.lower() == "kunyomi":
+                            rom_hiragana = p.getText().split(':')[1].strip()
+                            break
+            finally:
+                rom_katakana = rom_katakana.replace('(', '•').replace(')', '').replace(',', '、')
+                rom_hiragana = rom_hiragana.replace('(', '•').replace(')', '').replace(',', '、')
+                rom_katakana = romajiToJapanese(rom_katakana, use_hiragana=False)
+                rom_hiragana = romajiToJapanese(rom_hiragana, use_hiragana=True)
+                meaning = meaning.lower()
+
             link_info = link.split('nihongoichiban.com/')[1].split('/')
-            year = link_info [0]
+            year = link_info[0]
             month = link_info[1]
             img_url = f'https://nihongoichibandotcom.files.wordpress.com/{year}/{month}/{code.lower()}.gif'
-            download_image(img_url)    
+            download_image(img_url)
             return {
                 'kanji': searched_kanji,
+                'plataform': 'nihongoichiban',
                 'onyomi': rom_katakana,
                 'kunyomi': rom_hiragana,
                 'meaning': meaning,
                 'link': link
             }
     return None
-    
+
 
 def search_on_romajidesu(searched_kanji: str) -> dict:
     url = f"http://www.romajidesu.com/kanji/{quote(searched_kanji)}"
@@ -76,11 +114,11 @@ def search_on_romajidesu(searched_kanji: str) -> dict:
     soup = BeautifulSoup(req.content, 'html.parser')
     div_kanji_info = soup.find_all("div", class_="kanji_meaning")[0]
     meaning = div_kanji_info.findChildren()[0].findChildren()[1].getText()
-    meaning = meaning.strip().replace(';', ',').title()
-    
+    meaning = meaning.strip().replace(';', ',').lower()
+
     onyomis = div_kanji_info.find_all("div", class_="on_yomi")[0]
     kunyomis = div_kanji_info.find_all("div", class_="kun_yomi")[0]
-    
+
     def get_kana(kanas):
         def get_rid_of_romanji(text):
             final = ''
@@ -91,14 +129,14 @@ def search_on_romajidesu(searched_kanji: str) -> dict:
 
         kana = ''
         for k in kanas:
-            text:str = k.getText().replace(" ", "").replace("\n", "").replace(".", "•").replace("·", "")
+            text: str = k.getText().replace(" ", "").replace("\n", "").replace(".", "•").replace("·", "")
             if text != "":
                 kana += f'{get_rid_of_romanji(text)}、'
         return kana[:-1]
-    
+
     onyomi = get_kana(onyomis)
     kunyomi = get_kana(kunyomis)
-    
+
     str_file = '<html>'
     for script in soup.find_all("script"):
         content = str(script)
@@ -107,18 +145,20 @@ def search_on_romajidesu(searched_kanji: str) -> dict:
     str_file += str(soup.find_all("div", class_="kanji_strokes_order")[0])
     str_file += '</html>'
 
-    with open("kanji_page.html", "w", encoding="utf-8") as file:
+    html_path = str(path.join(Path(__file__).parent.absolute(), f'html/kanji_page.html'))
+    with open(html_path, "w", encoding="utf-8") as file:
         file.write(str_file)
-    
+
     div_kanji_info = soup.find_all("div", class_="kanji_info")[0]
     stroke_count = int(div_kanji_info.findChildren("a")[0].findChildren("b")[0].getText())
     width = 10 if stroke_count >= 10 else stroke_count
     height = 1 if stroke_count <= 10 else (2 if stroke_count <= 20 else 3)
     hti.screenshot(
-        html_file='kanji_page.html', save_as='kanji.png', size=(width*58 + 20, height*58 + 20)
+        html_file=html_path, save_as='romajidesu.png', size=(width * 58 + 20, height * 58 + 20)
     )
     return {
         'kanji': searched_kanji,
+        'plataform': 'romajidesu',
         'onyomi': onyomi,
         'kunyomi': kunyomi,
         'meaning': meaning,
@@ -131,12 +171,13 @@ def search_kanji():
     jlpts = ['n5', 'n4', 'n3']
     for jlpt in jlpts:
         print(f'Searching on {jlpt} nihongoichiban...')
-        r = search_on_nihongoichiban(jlpt)
+        r = search_on_nihongoichiban(kanji, jlpt)
         if r:
             return r
 
     print(f'Searching on romajidesu...')
-    return search_on_romajidesu(searched_kanji = kanji)
+    return search_on_romajidesu(searched_kanji=kanji)
+
 
 print(search_kanji())
 

@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 import PIL
 import PIL.Image
 import os
-
+from time import sleep
 
 chrome_options = Options()
 chrome_options.add_argument('--no-sandbox')
@@ -20,11 +20,24 @@ driver = webdriver.Chrome(options=chrome_options)
 
 
 
-def download_image(link):
+def download_image(link: str):
     import requests
     response = requests.get(link)
     file = open(f'images/nh/{link.split("/")[-1]}', "wb")
+    if str(response.content).find('404 Not Found') == -1:
+        file.write(response.content)
+        return
+    file.close()
+    os.remove(f'images/nh/{link.split("/")[-1]}')
+    if link.endswith('png'):
+        link = link.replace('png', 'jpg')
+    if link.endswith('jpg'):
+        link = link.replace('jpg', 'png')
+    response = requests.get(link)
+    
+    file = open(f'images/nh/{link.split("/")[-1]}', "wb")
     file.write(response.content)
+        
     # return response
 
 def download_images():
@@ -74,9 +87,10 @@ def download_pdf():
     print(os.listdir(path))
     files = os.listdir(path)
     #files.sort(key=int)
-    files = sorted(files, key=lambda i: int(i.split('t')[0]))
+    files = sorted(files, key=lambda i: int(i.split('t')[0]) if 't' in i else i.split('.')[0])
     print('\n\n\n\n\nALOOOOOOOOOOOO')
     print(files)
+    sleep(2)
     images = [
         PIL.Image.open(f'{path}/{f}')
         for f in files
